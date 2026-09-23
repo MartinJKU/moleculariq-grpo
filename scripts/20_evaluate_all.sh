@@ -22,13 +22,25 @@ SUFFIX="${SUFFIX:-r001}"
 BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
 
 # The official task YAML asks for max_tokens=32768 -- exactly Qwen2.5-0.5B's
-# context window. The harness computes max_ctx_len = max_length - max_gen_toks
-# and asserts it is positive, so the task as published cannot run on this model
-# on either backend. 4096 is far above anything a 0.5B actually emits (preflight
-# measured a mean of ~83 tokens) and leaves ~28k of context for the prompt, so
-# it does not bind in practice. It is recorded in every eval manifest under
-# `generation_overrides` and applied identically to all four models.
-MAX_GEN_TOKS="${MAX_GEN_TOKS:-4096}"
+# context window -- so max_ctx_len = max_length - max_gen_toks is 0 and the task
+# as published cannot run on this model. The cap has to come down; the question
+# is only how far.
+#
+# The official runs (moleculariq-eval's with_config branch, all 34 model
+# configs) pass no override at all, so on vLLM they ended up with an effective
+# ceiling of ~32.3k -- i.e. "generate until EOS". 28672 sits within ~11% of that
+# while reserving 4096 tokens for the prompt.
+#
+# 4096 of prompt budget is ~6x the longest prompt actually observed: measured
+# over 22,800 rendered prompts the distribution is median 436 / p99 556 /
+# max 702 tokens. That margin matters because an overlong prompt is
+# *left-truncated*, which would silently eat the front of the system prompt --
+# much worse than clipping a response.
+#
+# Neither limit binds in practice: the policy emits ~83 tokens on average.
+# Recorded in every eval manifest under `generation_overrides` and applied
+# identically to all four models.
+MAX_GEN_TOKS="${MAX_GEN_TOKS:-28672}"
 
 # `auto` probes batch sizes against the full context window and can thrash a
 # 80 GB card before settling. Pin it if you see repeated OOM warnings.

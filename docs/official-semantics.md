@@ -128,18 +128,52 @@ the cap has to be lowered.
 `--gen_kwargs max_gen_toks=N` cleanly overrides the YAML value (the harness logs
 a "multiple max token args provided" warning, which is expected).
 
-This project passes `max_gen_toks=4096`. A 0.5B policy emitted a mean of ~83
-tokens in preflight, so the cap does not bind in practice, and ~28k of context
-is left for the prompt. It is recorded in every evaluation manifest under
-`generation_overrides` and applied identically to all four models, so the
-comparison between them is unaffected. It is the *only* deviation from the
-official task config: repeats, sampling, stop rules, extraction and scoring are
-all untouched.
+### What the official runs actually used
 
-Note for reporting: because this is a deviation, absolute numbers from these
-runs are not strictly comparable with published leaderboard entries. The
-baseline-vs-specialists comparison, which is what this project claims, is
-internally consistent.
+The `with_config` branch carries the eval config for all 34 models in the paper.
+**None of them passes a generation override or `max_model_len`** -- including
+`qwen2.5-7b.yaml`, the same model family and the same 32768-token window. They
+ran the YAML as published, on vLLM, with `batch_size: auto`.
+
+That works on vLLM only by accident. `maybe_truncate` is called with
+`shrink_gen_toks=False`, so it takes the "truncate the prompt" branch and
+computes a prompt budget of `32768 - 32768 = 0`. `truncate_tokens` then does
+`tokens[-0:]` -- and in Python `-0 == 0`, so that slice returns the *entire*
+list rather than an empty one. The prompt survives untouched, `max_gen_toks`
+stays 32768, and vLLM clamps generation to whatever is left of the window.
+
+So the official effective ceiling was roughly 32,300 tokens: "generate until
+EOS". The HF backend reaches the same arithmetic and asserts instead.
+
+### What this project uses
+
+`max_gen_toks=28672`, which is within ~11% of the official effective ceiling and
+reserves 4096 tokens for the prompt.
+
+That prompt budget is sized from measurement, not guesswork: over 22,800
+rendered training prompts the distribution is median 436 / p99 556 / max 702
+tokens, so 4096 is roughly 6x the observed maximum. The margin matters because
+an overlong prompt is *left-truncated*, which would silently remove the front of
+the system prompt -- a much worse failure than clipping a response.
+
+Neither limit binds in practice; the policy emits ~83 tokens on average. The
+override is recorded in every evaluation manifest under `generation_overrides`
+and applied identically to all four models.
+
+### What it means for the numbers
+
+The cap can only ever *cost* accuracy: a truncated response loses its closing
+`</answer>`, so extraction fails and it scores 0. There is no mechanism by which
+it inflates a score.
+
+* Between the four models here: comparable unconditionally -- same cap, backend,
+  prompt, task and scoring.
+* Against published leaderboard entries: comparable provided the cap never
+  binds, which is checkable after the fact from the `--log_samples` output. The
+  remaining difference is the backend (HF here, vLLM there): same weights and
+  same sampling parameters, different kernels, so outputs are not token
+  identical. Worth a sentence in the methods section, not a comparability
+  problem.
 
 ## Sampling temperature comes from the model, not the task
 
