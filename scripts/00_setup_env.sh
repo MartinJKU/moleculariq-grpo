@@ -53,6 +53,10 @@ clone_at https://github.com/ml-jku/moleculariq-eval.git \
 python -m pip install -e "$THIRD_PARTY/moleculariq-core"
 if [ "$INSTALL_VLLM" = "1" ]; then
   python -m pip install -e "$THIRD_PARTY/moleculariq-eval[vllm]"
+  # The harness's vllm backend imports ray unconditionally, while vLLM only
+  # depends on it for multi-GPU. Without this a single-GPU pod fails at model
+  # construction with ModuleNotFoundError: No module named 'ray'.
+  python -m pip install "ray>=2.9"
 else
   python -m pip install -e "$THIRD_PARTY/moleculariq-eval"
 fi

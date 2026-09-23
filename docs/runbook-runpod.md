@@ -219,5 +219,10 @@ the batch would break prompt grouping.
 rollouts. Check `temperature`, check the logged completions, and check that the
 shape reward is actually enabled (`format_weight > 0`).
 
+**`ModuleNotFoundError: No module named 'ray'` at evaluation** — the harness's
+vLLM backend imports ray at module level, but vLLM only depends on it for
+multi-GPU. `pip install ray`, delete the empty result directory, re-run.
+`scripts/00_setup_env.sh` installs it alongside vLLM now.
+
 **vLLM refuses to install / import** — skip it. `INSTALL_VLLM=0 bash
 scripts/00_setup_env.sh` and `BACKEND=hf` for evaluation. Slower, same numbers.

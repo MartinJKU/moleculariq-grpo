@@ -32,7 +32,12 @@ dev = ["pytest>=7.0"]
 peft = ["peft>=0.14"]
 # vLLM speeds up GRPO rollouts and benchmark inference, but pins hard against
 # torch. Install it only after the plain path is known to work.
-vllm = ["vllm>=0.8"]
+#
+# ray is listed explicitly: moleculariq-eval's vllm backend does a top-level
+# `import ray` in lm_eval/models/vllm_causallms.py, but vLLM itself only pulls
+# ray in for multi-GPU tensor parallelism -- so a single-GPU install leaves the
+# backend unimportable and evaluation dies at model construction.
+vllm = ["vllm>=0.8", "ray>=2.9"]
 
 [project.scripts]
 miq-build-dataset = "miqgrpo.build_dataset:main"
