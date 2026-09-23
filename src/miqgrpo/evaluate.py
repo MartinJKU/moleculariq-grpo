@@ -109,7 +109,7 @@ def build_command(
     dtype: str,
     gpu_memory_utilization: float,
     limit: int | None,
-    max_gen_toks: int | None = None,
+    gen_kwargs: dict[str, Any] | None = None,
     dry_run: bool = False,
 ) -> list[str]:
     if backend == "vllm":
@@ -137,16 +137,27 @@ def build_command(
         "--output_path",
         str(output_path),
     ]
-    if max_gen_toks is not None:
-        # The official task YAML asks for max_tokens=32768, which equals
-        # Qwen2.5-0.5B's whole context window -- the harness then computes
-        # max_ctx_len = max_length - max_gen_toks = 0 and asserts. The task is
-        # unrunnable on this model as published, so the generation cap has to be
-        # lowered. `max_gen_toks` outranks `max_tokens` in the harness's alias
-        # priority, so this is the documented override; it is recorded in the
-        # manifest under `generation_overrides` and applied identically to every
-        # model so the comparison stays internally valid.
-        command += ["--gen_kwargs", f"max_gen_toks={max_gen_toks}"]
+    if gen_kwargs:
+        # Two things force explicit generation kwargs on the HF backend, and
+        # both are about *matching* the official vLLM runs rather than departing
+        # from them -- see docs/official-semantics.md.
+        #
+        #   max_gen_toks: the task YAML asks for 32768 new tokens, exactly this
+        #     model's context window, so max_ctx_len = max_length - max_gen_toks
+        #     is 0 and the run asserts. vLLM survives the same arithmetic only
+        #     through a tokens[-0:] quirk that returns the whole list.
+        #
+        #   temperature/top_p/top_k/repetition_penalty: the task sets
+        #     do_sample=true and no temperature. The vLLM backend drops
+        #     do_sample and leaves temperature unset, so vLLM's SamplingParams
+        #     defaults apply (1.0 / 1.0 / off / 1.0). The HF backend instead
+        #     injects temperature=0.0 and then crashes on do_sample=true; and if
+        #     it did not, HF would fall back to Qwen's own generation_config
+        #     (0.7 / 0.8 / 20 / 1.1), which is not what the official runs used.
+        #
+        # Recorded in the manifest under `generation_overrides`.
+        rendered = ",".join(f"{key}={value}" for key, value in gen_kwargs.items())
+        command += ["--gen_kwargs", rendered]
     if limit is not None:
         command += ["--limit", str(limit)]
     return command
@@ -183,7 +194,7 @@ def run_benchmark(
     dtype: str = "bfloat16",
     gpu_memory_utilization: float = 0.85,
     limit: int | None = None,
-    max_gen_toks: int | None = None,
+    gen_kwargs: dict[str, Any] | None = None,
     smoke: bool = False,
     dry_run: bool = False,
 ) -> Path:
@@ -209,7 +220,7 @@ def run_benchmark(
         dtype,
         gpu_memory_utilization,
         limit,
-        max_gen_toks=max_gen_toks,
+        gen_kwargs=gen_kwargs,
         dry_run=dry_run,
     )
 
@@ -237,9 +248,7 @@ def run_benchmark(
         # come from the official task YAML. The only override is the generation
         # cap, and only because the published value is unrunnable on a model
         # whose context equals it -- see build_command.
-        "generation_overrides": (
-            {"max_gen_toks": max_gen_toks} if max_gen_toks is not None else None
-        ),
+        "generation_overrides": dict(gen_kwargs) if gen_kwargs else None,
         "command": command,
         "harness": _harness_version(),
         "training": _training_provenance(experiment_id),
@@ -306,6 +315,22 @@ def run_benchmark(
     return out_dir
 
 
+def parse_gen_kwargs(raw: str | None) -> dict[str, Any] | None:
+    """Parse ``k=v,k=v`` into an ordered mapping, preserving written form."""
+    if not raw:
+        return None
+    parsed: dict[str, Any] = {}
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise SystemExit(f"malformed --gen-kwargs entry {item!r}; expected key=value")
+        key, value = item.split("=", 1)
+        parsed[key.strip()] = value.strip()
+    return parsed or None
+
+
 def _quote(part: str) -> str:
     return f"'{part}'" if any(c in part for c in " \n\"'") else part
 
@@ -324,12 +349,12 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--dtype", default="bfloat16")
     run.add_argument("--gpu-memory-utilization", type=float, default=0.85)
     run.add_argument(
-        "--max-gen-toks",
-        type=int,
+        "--gen-kwargs",
         default=None,
         help=(
-            "override the task's generation cap; required for models whose "
-            "context length equals the task YAML's max_tokens"
+            "comma-separated key=value generation overrides passed through to "
+            "lm_eval, e.g. 'max_gen_toks=28672,temperature=1.0'. Recorded in the "
+            "run manifest under generation_overrides"
         ),
     )
     run.add_argument("--limit", type=int, default=None)
@@ -351,7 +376,7 @@ def main(argv: list[str] | None = None) -> None:
         dtype=args.dtype,
         gpu_memory_utilization=args.gpu_memory_utilization,
         limit=args.limit,
-        max_gen_toks=args.max_gen_toks,
+        gen_kwargs=parse_gen_kwargs(args.gen_kwargs),
         smoke=args.smoke,
         dry_run=args.dry_run,
     )

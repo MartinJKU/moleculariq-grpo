@@ -175,17 +175,41 @@ it inflates a score.
   identical. Worth a sentence in the methods section, not a comparability
   problem.
 
-## Sampling temperature comes from the model, not the task
+## Sampling parameters differ by backend, and HF has to be told explicitly
 
-The task sets `do_sample: true` and no temperature. In `normalize_gen_kwargs`
-the `do_sample=True` branch only emits a warning when the locally-computed
-temperature is 0.0 -- it never writes `temperature` into the kwargs. So HF
-generation falls through to the model's own `generation_config.json`
-(temperature 0.7, top_p 0.8, top_k 20 for Qwen2.5-0.5B-Instruct).
+The task sets `do_sample: true` and no temperature. What that ends up meaning
+depends entirely on the backend.
 
-The `do_sample=True but temperature=0.0` warning in the logs is therefore
-misleading: decoding really is stochastic, and pass@3 is meaningful rather than
-three copies of a greedy decode.
+**vLLM (what the official runs used).** `normalize_gen_kwargs` leaves
+`temperature` unset in the `do_sample=True` branch -- it only warns.
+`modify_gen_kwargs` then pops `do_sample` and hands the rest to
+`SamplingParams`. With no temperature key, vLLM's own defaults apply:
+
+    temperature 1.0 · top_p 1.0 · top_k off · repetition_penalty 1.0
+
+**HF.** `huggingface.py:996` does
+`generation_kwargs["temperature"] = generation_kwargs.get("temperature", 0.0)`,
+injecting 0.0. It is only popped again when `do_sample is False`. Our task sets
+`do_sample: true`, so both survive into `generate()` and transformers raises:
+
+    ValueError: `temperature` (=0.0) has to be a strictly positive float
+
+Worth being precise about the consequence, because it is easy to get wrong: HF
+does **not** fall back to the model's `generation_config.json` here, because 0.0
+is explicitly injected. But if that injection were fixed, it *would* -- and for
+Qwen2.5-0.5B-Instruct that config is temperature 0.7, top_p 0.8, top_k 20,
+repetition_penalty 1.1. None of which the official runs used.
+
+So the HF backend has to be told the sampling parameters explicitly, and the
+right values are vLLM's defaults:
+
+    temperature=1.0,top_p=1.0,top_k=0,repetition_penalty=1.0
+
+In transformers, `top_p=1.0` and `top_k=0` disable those warpers and
+`repetition_penalty=1.0` is a no-op, so this is plain temperature-1.0 sampling
+-- exactly what vLLM did. This is reproduction of the official setting, not a
+departure from it, and it is what makes pass@3 meaningful rather than three
+copies of one decode.
 
 ## Constraint phrasing is sometimes ungrammatical, on purpose
 

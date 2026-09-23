@@ -21,26 +21,34 @@ BACKEND="${BACKEND:-vllm}"
 SUFFIX="${SUFFIX:-r001}"
 BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
 
-# The official task YAML asks for max_tokens=32768 -- exactly Qwen2.5-0.5B's
-# context window -- so max_ctx_len = max_length - max_gen_toks is 0 and the task
-# as published cannot run on this model. The cap has to come down; the question
-# is only how far.
+# Generation kwargs, passed through to lm_eval. Every value here exists to make
+# the HF backend behave like the official vLLM runs -- none of it is a choice
+# about how the model should answer. See docs/official-semantics.md.
 #
-# The official runs (moleculariq-eval's with_config branch, all 34 model
-# configs) pass no override at all, so on vLLM they ended up with an effective
-# ceiling of ~32.3k -- i.e. "generate until EOS". 28672 sits within ~11% of that
-# while reserving 4096 tokens for the prompt.
+# max_gen_toks=28672
+#   The task YAML asks for max_tokens=32768, exactly Qwen2.5-0.5B's context
+#   window, so max_ctx_len = max_length - max_gen_toks = 0 and the run asserts.
+#   The official vLLM runs survived the identical arithmetic only because
+#   truncate_tokens does tokens[-0:], which in Python returns the whole list --
+#   leaving them an effective ceiling of ~32.3k. 28672 is within ~11% of that
+#   and reserves 4096 tokens for the prompt, ~6x the longest prompt measured
+#   (median 436 / p99 556 / max 702 over 22,800 rendered prompts).
 #
-# 4096 of prompt budget is ~6x the longest prompt actually observed: measured
-# over 22,800 rendered prompts the distribution is median 436 / p99 556 /
-# max 702 tokens. That margin matters because an overlong prompt is
-# *left-truncated*, which would silently eat the front of the system prompt --
-# much worse than clipping a response.
+# temperature=1.0, top_p=1.0, top_k=0, repetition_penalty=1.0
+#   The task sets do_sample=true and no temperature. The vLLM backend drops
+#   do_sample and never sets temperature, so vLLM's SamplingParams defaults
+#   applied: temperature 1.0, top_p 1.0, top_k off, no repetition penalty.
+#   The HF backend instead injects temperature=0.0 (huggingface.py:996) and
+#   then raises on do_sample=true. Even once that is fixed, leaving these unset
+#   makes HF fall back to Qwen2.5-0.5B-Instruct's own generation_config
+#   (0.7 / 0.8 / 20 / 1.1) -- different sampling from the official runs, and a
+#   silent difference rather than a loud one. In HF, top_k=0 and top_p=1.0
+#   disable those warpers, and repetition_penalty=1.0 is a no-op, so this
+#   reproduces plain temperature-1.0 sampling.
 #
-# Neither limit binds in practice: the policy emits ~83 tokens on average.
-# Recorded in every eval manifest under `generation_overrides` and applied
-# identically to all four models.
-MAX_GEN_TOKS="${MAX_GEN_TOKS:-28672}"
+# All of it is recorded in each eval manifest under `generation_overrides` and
+# applied identically to all four models.
+GEN_KWARGS="${GEN_KWARGS:-max_gen_toks=28672,temperature=1.0,top_p=1.0,top_k=0,repetition_penalty=1.0}"
 
 # `auto` probes batch sizes against the full context window and can thrash a
 # 80 GB card before settling. Pin it if you see repeated OOM warnings.
@@ -58,7 +66,7 @@ evaluate () {
     --label "$label"
     --backend "$BACKEND"
     --batch-size "$BATCH_SIZE"
-    --max-gen-toks "$MAX_GEN_TOKS"
+    --gen-kwargs "$GEN_KWARGS"
   )
   if [ -n "$experiment" ]; then
     args+=(--experiment "$experiment")

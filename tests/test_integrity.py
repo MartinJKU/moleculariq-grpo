@@ -257,13 +257,16 @@ def test_generation_override_is_recorded_when_used(tmp_path, monkeypatch):
         model_path="Qwen/Qwen2.5-0.5B-Instruct",
         label="baseline",
         backend="hf",
-        max_gen_toks=4096,
+        gen_kwargs={"max_gen_toks": 28672, "temperature": 1.0},
         dry_run=True,
     )
     manifest = json.loads((out_dir / "eval_manifest.json").read_text())
-    assert manifest["generation_overrides"] == {"max_gen_toks": 4096}
+    assert manifest["generation_overrides"] == {
+        "max_gen_toks": 28672,
+        "temperature": 1.0,
+    }
     assert "--gen_kwargs" in manifest["command"]
-    assert "max_gen_toks=4096" in manifest["command"]
+    assert "max_gen_toks=28672,temperature=1.0" in manifest["command"]
     # The override must not quietly become a subset run.
     assert manifest["full_benchmark"] is True
 
@@ -284,3 +287,32 @@ def test_no_generation_override_by_default(tmp_path, monkeypatch):
     manifest = json.loads((out_dir / "eval_manifest.json").read_text())
     assert manifest["generation_overrides"] is None
     assert "--gen_kwargs" not in manifest["command"]
+
+
+def test_gen_kwargs_parsing():
+    from miqgrpo.evaluate import parse_gen_kwargs
+
+    assert parse_gen_kwargs(None) is None
+    assert parse_gen_kwargs("") is None
+    assert parse_gen_kwargs("a=1,b=2.5") == {"a": "1", "b": "2.5"}
+    assert parse_gen_kwargs(" a = 1 , b = x ") == {"a": "1", "b": "x"}
+    with pytest.raises(SystemExit, match="malformed"):
+        parse_gen_kwargs("a=1,oops")
+
+
+def test_shipped_eval_script_reproduces_the_official_sampling():
+    """The HF backend must be told to sample the way vLLM did by default.
+
+    Left unset, HF falls back to Qwen's generation_config (0.7/0.8/20/1.1),
+    which is not what the official runs used -- and that difference would be
+    silent.
+    """
+    script = (REPO_ROOT / "scripts" / "20_evaluate_all.sh").read_text()
+    for expected in (
+        "temperature=1.0",
+        "top_p=1.0",
+        "top_k=0",
+        "repetition_penalty=1.0",
+        "max_gen_toks=28672",
+    ):
+        assert expected in script, expected
