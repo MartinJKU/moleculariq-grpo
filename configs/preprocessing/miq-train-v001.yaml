@@ -1,0 +1,74 @@
+# Frozen MolecularIQ GRPO training dataset.
+#
+# Immutable: changing anything here means a new dataset_artifact_id, because the
+# manifest hash of this file is what ties a training run to its data.
+#
+# Build:  python -m miqgrpo.build_dataset build  --config configs/preprocessing/miq-train-v001.yaml
+# Verify: python -m miqgrpo.build_dataset verify --artifact miq-train-v001
+
+dataset_artifact_id: miq-train-v001
+
+source:
+  # The only molecule source allowed. The benchmark pool and the hidden
+  # validation pools are rejected by build_dataset._check_sources.
+  dataset_id: ml-jku/moleculariq-trainPool
+  split: train
+  cache_dir: null
+
+generation:
+  seed: 42
+
+  # Molecules used to build property statistics. These statistics decide which
+  # molecule is asked about (favouring ones that actually have the feature) and
+  # how common a generation constraint is. More molecules = better prevalence
+  # estimates; 20k takes ~15 min on one core, ~4 min across 8 (see n_workers).
+  n_reference_molecules: 20000
+
+  # Property computation over the reference molecules is the slowest part of
+  # preprocessing (~50 ms each, so ~15 min serially for 20k). Processes split it;
+  # the result is identical either way. 0 or 1 forces the serial path.
+  n_workers: 8
+
+  # SMILES representation axis, matching the official generator's 50/50 split.
+  randomize_prob: 0.5
+  kekulize_prob: 0.5
+
+  # Bertz-complexity mix of the molecules asked about. Tilted towards smaller
+  # molecules: a preflight rollout of the base policy on training-pool questions
+  # scored 0 on every rollout of every 60-heavy-atom molecule, and a GRPO group
+  # whose rewards are all identical contributes nothing to the gradient. All
+  # three bins stay represented so the policy still sees hard items.
+  # Decided from a training-data rollout, never from benchmark scores.
+  complexity_weights: {"0-250": 0.5, "250-1000": 0.35, "1000-inf": 0.15}
+
+  # Held-out slice of the *training* distribution, for monitoring generalisation
+  # without ever touching the official benchmark.
+  dev_fraction: 0.05
+
+  tasks:
+    count:
+      n_examples: 8000
+      # Tilted towards single-task items relative to the benchmark's own mix.
+      # A 0.5B policy solves almost no 5-property item, and a group where every
+      # rollout scores 0 contributes no GRPO gradient. Chosen a priori, not from
+      # benchmark results.
+      multitask_weights: {1: 0.60, 2: 0.20, 3: 0.15, 5: 0.05}
+
+    index:
+      n_examples: 8000
+      multitask_weights: {1: 0.60, 2: 0.20, 3: 0.15, 5: 0.05}
+
+    constraint_generation:
+      n_examples: 8000
+      multitask_weights: {1: 0.60, 2: 0.20, 3: 0.15, 5: 0.05}
+      # Reject constraint sets that more than 3% of real molecules satisfy.
+      # Without this the pool fills with "generate a molecule with no boc group",
+      # which any output satisfies -- free reward for a constant answer.
+      max_constraint_prevalence: 0.03
+      min_constraint_prevalence: 0.0
+
+integrity:
+  forbid_official_benchmark_inputs: true
+  fail_on_duplicate_example_id: true
+  fail_on_prompt_target_leakage: true
+  require_oracle_verified_targets: true

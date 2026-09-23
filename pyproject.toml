@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "miqgrpo"
+version = "0.1.0"
+description = "Single-task GRPO training of Qwen2.5-0.5B-Instruct on MolecularIQ"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# Versions are pinned to what the pipeline was developed and validated against.
+# TRL's GRPO API moves between minor releases (num_generations arithmetic,
+# reward-function signature, config field names all changed recently), so an
+# unpinned install is a silent source of "it worked last week".
+dependencies = [
+  "torch>=2.6,<3.0",
+  "transformers>=5.0,<6.0",
+  "trl==1.13.0",
+  "accelerate>=1.10",
+  "datasets>=4.0",
+  "moleculariq-core @ git+https://github.com/ml-jku/moleculariq-core.git@a1b89635371c3cd942e44ebeec63ec3665e7743d",
+  "rdkit>=2023.3.1",
+  "pyyaml>=6.0",
+  "matplotlib>=3.8",
+  "huggingface-hub>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+peft = ["peft>=0.14"]
+# vLLM speeds up GRPO rollouts and benchmark inference, but pins hard against
+# torch. Install it only after the plain path is known to work.
+vllm = ["vllm>=0.8"]
+
+[project.scripts]
+miq-build-dataset = "miqgrpo.build_dataset:main"
+miq-train = "miqgrpo.train_grpo:main"
+miq-evaluate = "miqgrpo.evaluate:main"
+miq-plots = "miqgrpo.plots:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

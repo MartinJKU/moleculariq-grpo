@@ -1,0 +1,16 @@
+# Artifacts. Everything here is reproducible from configs + scripts, and too
+# large for git; the manifests that identify them are committed instead.
+data/
+runs/
+results/
+third_party/
+.venv/
+assets_manifest.json
+logs/*
+!logs/.gitkeep
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.DS_Store
