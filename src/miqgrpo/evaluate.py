@@ -109,6 +109,7 @@ def build_command(
     dtype: str,
     gpu_memory_utilization: float,
     limit: int | None,
+    max_gen_toks: int | None = None,
     dry_run: bool = False,
 ) -> list[str]:
     if backend == "vllm":
@@ -136,6 +137,16 @@ def build_command(
         "--output_path",
         str(output_path),
     ]
+    if max_gen_toks is not None:
+        # The official task YAML asks for max_tokens=32768, which equals
+        # Qwen2.5-0.5B's whole context window -- the harness then computes
+        # max_ctx_len = max_length - max_gen_toks = 0 and asserts. The task is
+        # unrunnable on this model as published, so the generation cap has to be
+        # lowered. `max_gen_toks` outranks `max_tokens` in the harness's alias
+        # priority, so this is the documented override; it is recorded in the
+        # manifest under `generation_overrides` and applied identically to every
+        # model so the comparison stays internally valid.
+        command += ["--gen_kwargs", f"max_gen_toks={max_gen_toks}"]
     if limit is not None:
         command += ["--limit", str(limit)]
     return command
@@ -172,6 +183,7 @@ def run_benchmark(
     dtype: str = "bfloat16",
     gpu_memory_utilization: float = 0.85,
     limit: int | None = None,
+    max_gen_toks: int | None = None,
     smoke: bool = False,
     dry_run: bool = False,
 ) -> Path:
@@ -197,6 +209,7 @@ def run_benchmark(
         dtype,
         gpu_memory_utilization,
         limit,
+        max_gen_toks=max_gen_toks,
         dry_run=dry_run,
     )
 
@@ -220,9 +233,13 @@ def run_benchmark(
         "system_instruction": SYSTEM_PROMPT,
         "system_instruction_source": "moleculariq-eval task_processor.SYSTEM_PROMPT",
         "apply_chat_template": True,
-        # generation params, extraction and repeats all come from the official
-        # task YAML; overriding them here would stop this being an official run
-        "generation_overrides": None,
+        # Repeats, sampling temperature, stop rules and answer extraction all
+        # come from the official task YAML. The only override is the generation
+        # cap, and only because the published value is unrunnable on a model
+        # whose context equals it -- see build_command.
+        "generation_overrides": (
+            {"max_gen_toks": max_gen_toks} if max_gen_toks is not None else None
+        ),
         "command": command,
         "harness": _harness_version(),
         "training": _training_provenance(experiment_id),
@@ -306,6 +323,15 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--batch-size", default="auto")
     run.add_argument("--dtype", default="bfloat16")
     run.add_argument("--gpu-memory-utilization", type=float, default=0.85)
+    run.add_argument(
+        "--max-gen-toks",
+        type=int,
+        default=None,
+        help=(
+            "override the task's generation cap; required for models whose "
+            "context length equals the task YAML's max_tokens"
+        ),
+    )
     run.add_argument("--limit", type=int, default=None)
     run.add_argument(
         "--smoke",
@@ -325,6 +351,7 @@ def main(argv: list[str] | None = None) -> None:
         dtype=args.dtype,
         gpu_memory_utilization=args.gpu_memory_utilization,
         limit=args.limit,
+        max_gen_toks=args.max_gen_toks,
         smoke=args.smoke,
         dry_run=args.dry_run,
     )

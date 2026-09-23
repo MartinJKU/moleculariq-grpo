@@ -243,3 +243,44 @@ def test_full_run_command_carries_no_limit_and_the_official_task(tmp_path):
     assert SYSTEM_PROMPT in command
     # Generation settings must come from the official task YAML, not from us.
     assert "--gen_kwargs" not in command
+
+
+def test_generation_override_is_recorded_when_used(tmp_path, monkeypatch):
+    """A deviation from the official task config must appear in the manifest."""
+    import json
+
+    import miqgrpo.evaluate as evaluate
+
+    monkeypatch.setattr(evaluate, "evaluation_dir", lambda run_id: tmp_path / run_id)
+    out_dir = evaluate.run_benchmark(
+        run_id="probe",
+        model_path="Qwen/Qwen2.5-0.5B-Instruct",
+        label="baseline",
+        backend="hf",
+        max_gen_toks=4096,
+        dry_run=True,
+    )
+    manifest = json.loads((out_dir / "eval_manifest.json").read_text())
+    assert manifest["generation_overrides"] == {"max_gen_toks": 4096}
+    assert "--gen_kwargs" in manifest["command"]
+    assert "max_gen_toks=4096" in manifest["command"]
+    # The override must not quietly become a subset run.
+    assert manifest["full_benchmark"] is True
+
+
+def test_no_generation_override_by_default(tmp_path, monkeypatch):
+    import json
+
+    import miqgrpo.evaluate as evaluate
+
+    monkeypatch.setattr(evaluate, "evaluation_dir", lambda run_id: tmp_path / run_id)
+    out_dir = evaluate.run_benchmark(
+        run_id="probe2",
+        model_path="Qwen/Qwen2.5-0.5B-Instruct",
+        label="baseline",
+        backend="hf",
+        dry_run=True,
+    )
+    manifest = json.loads((out_dir / "eval_manifest.json").read_text())
+    assert manifest["generation_overrides"] is None
+    assert "--gen_kwargs" not in manifest["command"]

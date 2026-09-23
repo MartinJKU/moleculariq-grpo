@@ -112,6 +112,47 @@ The rejections are recorded in the dataset manifest under
 `property_catalog.rejected`. Probing rather than hard-coding means a later
 upstream fix is picked up automatically.
 
+## The published generation cap cannot run on a 32k-context model
+
+`moleculariq_pass_at_k.yaml` sets `generation_kwargs: max_tokens: 32768`.
+Qwen2.5-0.5B-Instruct's context window is also 32768. The harness computes
+
+    max_ctx_len = model.max_length - max_gen_toks
+
+and asserts it is positive, so the task as published fails at request time on
+both backends -- vLLM and HF alike. There is no prompt short enough to fix it;
+the cap has to be lowered.
+
+`normalize_gen_kwargs` resolves the cap from aliases in the order
+`max_gen_toks > max_new_tokens > max_tokens > max_completion_tokens`, so
+`--gen_kwargs max_gen_toks=N` cleanly overrides the YAML value (the harness logs
+a "multiple max token args provided" warning, which is expected).
+
+This project passes `max_gen_toks=4096`. A 0.5B policy emitted a mean of ~83
+tokens in preflight, so the cap does not bind in practice, and ~28k of context
+is left for the prompt. It is recorded in every evaluation manifest under
+`generation_overrides` and applied identically to all four models, so the
+comparison between them is unaffected. It is the *only* deviation from the
+official task config: repeats, sampling, stop rules, extraction and scoring are
+all untouched.
+
+Note for reporting: because this is a deviation, absolute numbers from these
+runs are not strictly comparable with published leaderboard entries. The
+baseline-vs-specialists comparison, which is what this project claims, is
+internally consistent.
+
+## Sampling temperature comes from the model, not the task
+
+The task sets `do_sample: true` and no temperature. In `normalize_gen_kwargs`
+the `do_sample=True` branch only emits a warning when the locally-computed
+temperature is 0.0 -- it never writes `temperature` into the kwargs. So HF
+generation falls through to the model's own `generation_config.json`
+(temperature 0.7, top_p 0.8, top_k 20 for Qwen2.5-0.5B-Instruct).
+
+The `do_sample=True but temperature=0.0` warning in the logs is therefore
+misleading: decoding really is stochastic, and pass@3 is meaningful rather than
+three copies of a greedy decode.
+
 ## Constraint phrasing is sometimes ungrammatical, on purpose
 
 `NaturalLanguageFormatter.format_constraints_list` renders a zero-valued
