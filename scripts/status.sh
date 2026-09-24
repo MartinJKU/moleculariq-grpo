@@ -9,9 +9,34 @@
 
 set -uo pipefail
 
-DATA="${MIQ_DATA:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/data}"
-RUNS="${MIQ_RUNS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/runs}"
-RESULTS="${MIQ_RESULTS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/results}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DATA="${MIQ_DATA:-$REPO/data}"
+RUNS="${MIQ_RUNS:-$REPO/runs}"
+RESULTS="${MIQ_RESULTS:-$REPO/results}"
+
+# Report where we are looking before reporting what is there. Falling back to
+# repo-relative defaults in a shell that has not sourced the MIQ_* exports makes
+# a full pipeline look empty, which is worse than useless -- it looks like the
+# work was lost.
+echo "=============================================================="
+echo " paths"
+echo "=============================================================="
+printf "  data     %s\n" "$DATA"
+printf "  runs     %s\n" "$RUNS"
+printf "  results  %s\n" "$RESULTS"
+unset_vars=""
+[ -z "${MIQ_DATA:-}" ]    && unset_vars="$unset_vars MIQ_DATA"
+[ -z "${MIQ_RUNS:-}" ]    && unset_vars="$unset_vars MIQ_RUNS"
+[ -z "${MIQ_RESULTS:-}" ] && unset_vars="$unset_vars MIQ_RESULTS"
+if [ -n "$unset_vars" ]; then
+  echo
+  echo "  ! unset in this shell:$unset_vars"
+  echo "  ! falling back to repo-relative paths, which is probably NOT where"
+  echo "    your artifacts are. Run 'source ~/.bashrc', or set them inline:"
+  echo "      MIQ_DATA=/workspace/miq/data MIQ_RUNS=/workspace/miq/runs \\"
+  echo "      MIQ_RESULTS=/workspace/miq/results bash scripts/status.sh"
+fi
+echo
 
 echo "=============================================================="
 echo " live processes"
