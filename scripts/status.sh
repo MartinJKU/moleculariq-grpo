@@ -119,7 +119,8 @@ print(f"  COMPLETE  {sys.argv[2]}  [{full}]  {bits}")
 PY
   elif [ -f "$d/eval_manifest.json" ]; then
     rc=$(python3 -c "import json;print(json.load(open('$d/eval_manifest.json')).get('returncode'))" 2>/dev/null)
-    echo "  FAILED    $name (lm_eval exited $rc; see $d/stderr.log)"
+    log="$d/output.log"; [ -f "$log" ] || log="$d/stderr.log"
+    echo "  FAILED    $name (lm_eval exited $rc; see $log)"
   elif pgrep -af "lm_eval" 2>/dev/null | grep -q "$name"; then
     # No manifest yet, but lm_eval is alive and pointed at this directory --
     # in progress, not dead. The manifest is only written once lm_eval exits,

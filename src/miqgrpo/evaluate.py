@@ -282,24 +282,19 @@ def run_benchmark(
         json.dumps(environment_report(), indent=2, default=str) + "\n"
     )
 
-    with open(out_dir / "stdout.log", "w") as stdout, open(
-        out_dir / "stderr.log", "w"
-    ) as stderr:
-        completed = subprocess.run(
-            command, stdout=stdout, stderr=stderr, check=False, env=os.environ.copy()
-        )
+    returncode = _run_streaming(command, out_dir / "output.log")
 
     manifest["finished_utc"] = datetime.now(timezone.utc).isoformat()
-    manifest["returncode"] = completed.returncode
+    manifest["returncode"] = returncode
     manifest.update(_collect_results(raw_dir))
     write_json(out_dir / "eval_manifest.json", manifest)
     with open(out_dir / "eval_manifest.yaml", "w") as fh:
         yaml.safe_dump(manifest, fh, sort_keys=False)
     write_json(out_dir / "provenance.json", capture("evaluate", {"run_id": run_id}))
 
-    if completed.returncode != 0:
-        print(f"lm_eval exited {completed.returncode}; see {out_dir/'stderr.log'}")
-        sys.exit(completed.returncode)
+    if returncode != 0:
+        print(f"lm_eval exited {returncode}; full output in {out_dir / 'output.log'}")
+        sys.exit(returncode)
 
     headline = manifest.get("headline") or {}
     print("official metrics:")
@@ -315,6 +310,36 @@ def run_benchmark(
     }
     write_json(out_dir / "summary.json", summary)
     return out_dir
+
+
+def _run_streaming(command: list[str], log_path: Path) -> int:
+    """Run lm_eval, showing its output live *and* keeping a copy on disk.
+
+    Swallowing the harness's output into a file meant a multi-hour run showed
+    nothing at all after the launch banner -- indistinguishable from a hang.
+    Read raw chunks rather than lines so tqdm's carriage-return progress bars
+    come through as they are written instead of buffering until a newline.
+
+    stderr is merged into stdout: the progress bar lives on stderr, and one
+    interleaved log is easier to read after the fact than two half-stories.
+    """
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=os.environ.copy(),
+    )
+    assert process.stdout is not None
+    with open(log_path, "wb") as fh:
+        while True:
+            chunk = process.stdout.read1(65536)
+            if not chunk:
+                break
+            sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+            fh.write(chunk)
+            fh.flush()
+    return process.wait()
 
 
 def _check_model_path(model_path: str) -> None:

@@ -182,7 +182,8 @@ python -m miqgrpo.evaluate run --run-id smoke --model-path Qwen/Qwen2.5-0.5B-Ins
 ```
 
 Each real run writes `results/moleculariq/<id>/` with the manifest, the harness's
-own results file, per-sample logs and both streams' logs. Result directories are
+own results file, per-sample logs, and `output.log` (the harness's own output,
+which is also streamed to your terminal as it runs). Result directories are
 never overwritten; a repeat needs a new `--run-id`.
 
 ---
