@@ -26,6 +26,12 @@ RUNS_ROOT="${MIQ_RUNS:-$PROJECT_DIR/runs}"
 
 BACKEND="${BACKEND:-vllm}"
 SUFFIX="${SUFFIX:-r001}"
+
+# Say where things will be read from and written to, before doing any of it.
+echo "checkpoints : $RUNS_ROOT"
+echo "results     : ${MIQ_RESULTS:-$PROJECT_DIR/results}/moleculariq"
+echo "backend     : $BACKEND"
+echo
 BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
 
 # Generation kwargs, passed through to lm_eval. Every value here exists to make
@@ -86,7 +92,23 @@ evaluate () {
 for experiment in grpo-count-r001 grpo-index-r001 grpo-constraint-r001; do
   if [ ! -f "$RUNS_ROOT/$experiment/final/config.json" ]; then
     echo "missing checkpoint: $RUNS_ROOT/$experiment/final" >&2
-    echo "  (train it first, or point MIQ_RUNS at the right volume)" >&2
+    echo >&2
+    if [ -z "${MIQ_RUNS:-}" ]; then
+      # `echo $MIQ_RUNS` in an interactive shell succeeds for a plain shell
+      # variable, but only *exported* variables reach a child process, so this
+      # is easy to misread as "it is set, why is the script ignoring it".
+      echo "  MIQ_RUNS is not set in this script's environment, so checkpoints" >&2
+      echo "  were looked for under the repo: $PROJECT_DIR/runs" >&2
+      echo >&2
+      echo "  If 'echo \$MIQ_RUNS' prints a path but 'env | grep MIQ_RUNS' does" >&2
+      echo "  not, it is set but not exported. Either:" >&2
+      echo "    export MIQ_RUNS=/workspace/miq/runs   # and MIQ_DATA, MIQ_RESULTS" >&2
+      echo "  or pass them inline:" >&2
+      echo "    MIQ_RUNS=... MIQ_RESULTS=... bash scripts/20_evaluate_all.sh" >&2
+    else
+      echo "  MIQ_RUNS=$MIQ_RUNS" >&2
+      echo "  Train it first, or point MIQ_RUNS at the volume holding the runs." >&2
+    fi
     exit 1
   fi
 done
