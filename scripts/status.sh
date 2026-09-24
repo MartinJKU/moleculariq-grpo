@@ -120,6 +120,12 @@ PY
   elif [ -f "$d/eval_manifest.json" ]; then
     rc=$(python3 -c "import json;print(json.load(open('$d/eval_manifest.json')).get('returncode'))" 2>/dev/null)
     echo "  FAILED    $name (lm_eval exited $rc; see $d/stderr.log)"
+  elif pgrep -af "lm_eval" 2>/dev/null | grep -q "$name"; then
+    # No manifest yet, but lm_eval is alive and pointed at this directory --
+    # in progress, not dead. The manifest is only written once lm_eval exits,
+    # so absence alone cannot distinguish "running" from "killed".
+    started=$(stat -c %y "$d" 2>/dev/null | cut -d. -f1 || echo "?")
+    echo "  RUNNING   $name (started $started) - leave it alone"
   else
     echo "  PARTIAL   $name (killed mid-run; rm -rf it before retrying)"
   fi
