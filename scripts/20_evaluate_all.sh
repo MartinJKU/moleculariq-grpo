@@ -17,6 +17,13 @@ export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}"
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 
+# Checkpoints live under $MIQ_RUNS, which is usually NOT inside the repo --
+# on a pod it points at the persistent volume. A relative "runs/..." path here
+# silently becomes a Hugging Face repo id when transformers cannot resolve it
+# on disk, and the run dies two minutes in with "Repo id must be in the form
+# 'repo_name' or 'namespace/repo_name'".
+RUNS_ROOT="${MIQ_RUNS:-$PROJECT_DIR/runs}"
+
 BACKEND="${BACKEND:-vllm}"
 SUFFIX="${SUFFIX:-r001}"
 BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
@@ -74,10 +81,20 @@ evaluate () {
   python -m miqgrpo.evaluate run "${args[@]}"
 }
 
-evaluate baseline              "$BASE_MODEL"                    ""
-evaluate count                 "runs/grpo-count-r001/final"      grpo-count-r001
-evaluate index                 "runs/grpo-index-r001/final"      grpo-index-r001
-evaluate constraint_generation "runs/grpo-constraint-r001/final" grpo-constraint-r001
+# Fail before loading anything if a checkpoint is missing: a two-minute model
+# load followed by a confusing Hub error is a bad way to find out.
+for experiment in grpo-count-r001 grpo-index-r001 grpo-constraint-r001; do
+  if [ ! -f "$RUNS_ROOT/$experiment/final/config.json" ]; then
+    echo "missing checkpoint: $RUNS_ROOT/$experiment/final" >&2
+    echo "  (train it first, or point MIQ_RUNS at the right volume)" >&2
+    exit 1
+  fi
+done
+
+evaluate baseline              "$BASE_MODEL"                             ""
+evaluate count                 "$RUNS_ROOT/grpo-count-r001/final"        grpo-count-r001
+evaluate index                 "$RUNS_ROOT/grpo-index-r001/final"        grpo-index-r001
+evaluate constraint_generation "$RUNS_ROOT/grpo-constraint-r001/final"   grpo-constraint-r001
 
 echo
 echo "results in results/moleculariq/"

@@ -207,6 +207,8 @@ def run_benchmark(
     if smoke and limit is None:
         limit = 10
 
+    _check_model_path(model_path)
+
     out_dir = evaluation_dir(run_id if not smoke else f"{run_id}-smoke")
     refuse_to_overwrite(out_dir, f"benchmark result '{run_id}'")
     raw_dir = out_dir / "raw"
@@ -313,6 +315,32 @@ def run_benchmark(
     }
     write_json(out_dir / "summary.json", summary)
     return out_dir
+
+
+def _check_model_path(model_path: str) -> None:
+    """Catch a local checkpoint path that does not exist, before loading.
+
+    transformers treats an unresolvable path as a Hub repo id, so a wrong
+    checkpoint path surfaces minutes later as a cryptic "Repo id must be in the
+    form 'repo_name' or 'namespace/repo_name'" instead of "that directory is not
+    there". A Hub id has exactly one slash and no leading separator; anything
+    else that does not exist on disk is a broken path.
+    """
+    if Path(model_path).exists():
+        return
+    looks_like_hub_id = (
+        model_path.count("/") == 1
+        and not model_path.startswith(("/", ".", "~"))
+    )
+    if looks_like_hub_id:
+        return
+    raise SystemExit(
+        f"checkpoint not found: {model_path}\n"
+        f"This looks like a filesystem path, but nothing is there. transformers "
+        f"would fall back to treating it as a Hugging Face repo id and fail with "
+        f"a confusing error several minutes from now.\n"
+        f"If your checkpoints live on a volume, check $MIQ_RUNS."
+    )
 
 
 def parse_gen_kwargs(raw: str | None) -> dict[str, Any] | None:

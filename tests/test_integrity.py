@@ -316,3 +316,36 @@ def test_shipped_eval_script_reproduces_the_official_sampling():
         "max_gen_toks=28672",
     ):
         assert expected in script, expected
+
+
+def test_missing_checkpoint_path_fails_fast():
+    """transformers turns an unresolvable path into a confusing Hub error."""
+    from miqgrpo.evaluate import run_benchmark
+
+    with pytest.raises(SystemExit, match="checkpoint not found"):
+        run_benchmark(
+            run_id="x",
+            model_path="runs/grpo-count-r001/final",
+            label="count",
+            dry_run=True,
+        )
+
+
+def test_hub_ids_are_not_mistaken_for_paths(tmp_path, monkeypatch):
+    import miqgrpo.evaluate as evaluate
+
+    monkeypatch.setattr(evaluate, "evaluation_dir", lambda run_id: tmp_path / run_id)
+    evaluate.run_benchmark(
+        run_id="probe3",
+        model_path="Qwen/Qwen2.5-0.5B-Instruct",
+        label="baseline",
+        dry_run=True,
+    )
+
+
+def test_eval_script_resolves_checkpoints_under_miq_runs():
+    """A relative runs/ path breaks whenever MIQ_RUNS points off-repo."""
+    script = (REPO_ROOT / "scripts" / "20_evaluate_all.sh").read_text()
+    assert 'RUNS_ROOT="${MIQ_RUNS:-$PROJECT_DIR/runs}"' in script
+    assert '"runs/grpo-count-r001/final"' not in script
+    assert '"$RUNS_ROOT/grpo-count-r001/final"' in script
