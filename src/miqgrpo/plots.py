@@ -42,7 +42,7 @@ INK_SECONDARY = "#52514e"
 INK_MUTED = "#8a8980"
 GRID = "#e6e5e1"
 
-SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
+SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4")
 
 #: Diverging pair for "better/worse than baseline": blue <-> red, gray midpoint.
 DIVERGING_LOW = "#2a78d6"
@@ -51,12 +51,20 @@ DIVERGING_HIGH = "#e34948"
 
 #: Stable colour per model label, assigned by identity rather than by rank, so a
 #: filtered or reordered chart never repaints the survivors.
-MODEL_ORDER = ("baseline", "count", "index", "constraint_generation")
+MODEL_ORDER = (
+    "baseline",
+    "count",
+    "index",
+    "constraint_generation",
+    "index_noformat",
+)
 MODEL_LABELS = {
     "baseline": "Qwen2.5-0.5B-Instruct (base)",
     "count": "GRPO: count only",
     "index": "GRPO: index only",
     "constraint_generation": "GRPO: constrained generation only",
+    # Control for the index run: identical except the answer-shape reward is off.
+    "index_noformat": "GRPO: index only, no shaping",
 }
 MODEL_COLORS = dict(zip(MODEL_ORDER, SERIES))
 
@@ -668,6 +676,7 @@ DEFAULT_RUNS = {
     "grpo-count-r001": "count",
     "grpo-index-r001": "index",
     "grpo-constraint-r001": "constraint_generation",
+    "grpo-index-r002": "index_noformat",
 }
 
 

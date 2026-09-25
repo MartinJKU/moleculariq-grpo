@@ -135,6 +135,41 @@ printed in the question) and is capped far below correctness, so a well-shaped
 wrong answer can never outrank a correct one. `tests/test_rewards.py` asserts
 exactly that.
 
+### Follow-up: isolating the shaping term (`grpo-index-r002`)
+
+The first three runs produced a result worth chasing: the index-trained model
+got *significantly worse* at index attribution on the benchmark (−0.65 pp, 95%
+CI [−0.96, −0.38]) while its training reward went up. The training log explains
+it — verifier correctness fell 0.0091 → 0.0019 over 500 steps while answer-tag
+compliance climbed 25% → 99%, reward std collapsed 0.067 → 0.019, and mean
+completion length halved. The policy converged on short, perfectly formatted,
+wrong answers.
+
+The likely cause is structural. Index attribution starts at 0.84% accuracy, so
+effectively every rollout in every group scores zero on correctness and the
+answer-shape term is the only gradient there is. Capping shaping below
+correctness stops a formatted-wrong answer outranking a correct one *within a
+group*; it does not stop shaping becoming the sole optimisation target when
+correctness never fires.
+
+`grpo-index-r002` tests that directly: identical to `grpo-index-r001` except
+`format_weight: 0.1 → 0.0`. Verify before trusting the comparison:
+
+```bash
+python scripts/diff_experiments.py grpo-index-r001 grpo-index-r002
+# -> Exactly one variable differs -- a controlled comparison.
+```
+
+Reading the outcome:
+
+| result | conclusion |
+|---|---|
+| index accuracy holds ~flat | shaping caused the r001 degradation |
+| index accuracy still drops | cause lies elsewhere — data mix or optimisation, not the reward |
+
+Also watch `parse/answer_tag_fraction`: if format compliance still reaches ~99%
+without being paid for, the shaping term was never what produced it.
+
 ### There is a dev split, and it is not the benchmark
 
 Each family also gets a `*_dev` split — 5% of the generated examples, held out

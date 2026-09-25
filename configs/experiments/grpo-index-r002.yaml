@@ -1,0 +1,133 @@
+# Single-task GRPO run: index only, WITH THE SHAPING TERM REMOVED.
+#
+# Controlled follow-up to grpo-index-r001, which got significantly *worse* at
+# index attribution on the benchmark (-0.65 pp, 95% CI [-0.96, -0.38]) while its
+# total training reward rose. The training log showed why: verifier correctness
+# fell 0.0091 -> 0.0019 over 500 steps while answer-tag compliance went 25% ->
+# 99%, reward std collapsed 0.067 -> 0.019, and mean completion length halved.
+# The policy converged on short, perfectly formatted, wrong answers.
+#
+# The suspected cause is that index attribution starts at 0.84% accuracy, so
+# essentially every rollout in every group scores zero on correctness and the
+# answer-shape term is the only gradient available. Capping that term below
+# correctness prevents a formatted-wrong answer outranking a correct one within
+# a group; it does not stop shaping becoming the sole optimisation target when
+# correctness never fires.
+#
+# This run changes exactly one thing: format_weight 0.1 -> 0.0. Everything else
+# -- dataset artifact, split, seed, model, every GRPO hyperparameter -- is
+# identical to r001, so a difference in outcome is attributable to the shaping
+# term alone.
+#
+# What the result means:
+#   index accuracy holds ~flat  -> shaping caused the r001 degradation
+#   index accuracy still drops  -> the cause is elsewhere (look at the data mix
+#                                  or the optimisation itself, not the reward)
+#
+# Watch parse/answer_tag_fraction too: if format compliance still climbs to ~99%
+# without being paid for, it was never the shaping term's doing in the first
+# place.
+#
+#   python -m miqgrpo.train_grpo preflight --config configs/experiments/grpo-index-r002.yaml
+#   python -m miqgrpo.train_grpo train     --config configs/experiments/grpo-index-r002.yaml
+
+experiment:
+  id: grpo-index-r002
+  task_family: index
+  notes: >-
+    Control for grpo-index-r001. Index attribution only, with the answer-shape
+    reward switched off (format_weight 0.1 -> 0.0) and nothing else changed, to
+    test whether that term caused r001's significant drop in benchmark index
+    accuracy. Expect a near-flat reward curve: with correctness at ~0.9% there
+    may be very little gradient left once shaping is removed, which is itself
+    the finding.
+
+model:
+  id: Qwen/Qwen2.5-0.5B-Instruct
+  revision: null
+  dtype: bfloat16
+  attn_implementation: null
+  peft:
+    # 0.5B fits comfortably in a single A100; full fine-tuning avoids the extra
+    # variable an adapter would introduce into the baseline comparison.
+    enabled: false
+
+data:
+  artifact_id: miq-train-v001
+  split: index
+  dev_split: index_dev
+  # Filled in from the dataset manifest by scripts/fill_dataset_hash.py, so a
+  # run refuses to start against data that changed underneath it.
+  expected_hash: null
+
+grpo:
+  learning_rate: 1.0e-6
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 10
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+
+  # 16 completions/device x 4 accumulation steps = 64 completions per optimizer
+  # step = 8 prompt groups of 8. generation_batch_size must stay divisible by
+  # num_generations; preflight checks this before the model loads.
+  per_device_train_batch_size: 16
+  gradient_accumulation_steps: 4
+  num_generations: 8
+
+  # Long enough for a short chain of thought plus the answer block. Truncation
+  # fraction is logged; raise this if it climbs.
+  max_completion_length: 512
+
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 0
+  min_p: null
+  repetition_penalty: 1.0
+
+  # beta=0 drops the KL term: with a verifiable binary reward there is no reward
+  # model to over-optimise against, and the reference forward pass costs ~30%.
+  beta: 0.0
+  epsilon: 0.2
+  epsilon_high: null
+  loss_type: dapo
+  scale_rewards: group
+  num_iterations: 1
+  mask_truncated_completions: false
+
+  max_steps: 500
+  num_train_epochs: 1.0
+  gradient_checkpointing: true
+  bf16: true
+
+rewards:
+  # Official verifier, binary. This is the only term that decides rank order.
+  correctness_weight: 1.0
+  # Switched off -- this is the single variable under test. With it at 0 the
+  # FormatReward callable is not constructed at all, so the only reward is the
+  # official verifier. parse/* diagnostics are still logged (they live in
+  # CorrectnessReward), so format compliance is still observable, just unpaid.
+  format_weight: 0.0
+  validity_weight: 0.0
+
+runtime:
+  seed: 42
+  logging_steps: 5
+  save_steps: 100
+  save_total_limit: 3
+  log_completions: true
+  num_completions_to_print: 4
+  # vLLM colocate roughly triples rollout throughput on one A100 but adds a
+  # version-compatibility surface. Validate the plain path first, then flip.
+  use_vllm: false
+  vllm_mode: colocate
+  vllm_gpu_memory_utilization: 0.3
+  report_to: none
+  dataloader_num_workers: 0
+
+benchmark_integrity:
+  official_benchmark_used_for_training: false
+  official_benchmark_used_for_hparam_selection: false
+  official_benchmark_used_for_prompt_tuning: false
+  official_benchmark_used_for_extraction_tuning: false
+  official_benchmark_used_for_checkpoint_selection: false
+  official_benchmark_run_ids: []
