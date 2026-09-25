@@ -373,18 +373,31 @@ def load_samples(directory: Path) -> list[dict[str, Any]]:
     Used only to *break down* the official numbers by task type, complexity and
     multitask load. The headline metrics always come from the harness's own
     results file, never recomputed here.
+
+    Only the newest sample file is read. A result directory can accumulate more
+    than one -- a rerun into a directory whose earlier attempt left files behind
+    -- and globbing all of them silently doubles the item count and mixes two
+    different runs into one breakdown. The harness names them with an ISO
+    timestamp, so lexical order is chronological.
     """
+    files = sorted(directory.rglob("samples_*.jsonl"))
+    if not files:
+        return []
+    if len(files) > 1:
+        print(
+            f"  ! {directory.name}: {len(files)} sample files; using only the "
+            f"newest ({files[-1].name}). The others are from earlier runs."
+        )
     samples: list[dict[str, Any]] = []
-    for path in sorted(directory.rglob("samples_*.jsonl")):
-        with open(path) as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    samples.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+    with open(files[-1]) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                samples.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
     return samples
 
 
